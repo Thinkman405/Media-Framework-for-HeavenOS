@@ -44,8 +44,12 @@ test suite and a real, independently MSVC-compiled C program
 **Blocked on the GStreamer development SDK**, currently: it needs
 administrator elevation to install, which the development environment this
 was built in cannot grant (no interactive session to approve the UAC
-prompt). Not yet resolved — see `vendor/heavenos`'s own memory/notes for
-what's been tried.
+prompt). Not yet resolved.
+
+The full design for the element itself — base class, caps, properties,
+lifecycle, verification plan — is written up in
+[`CONTEXT.md`](CONTEXT.md), ready to implement the moment the SDK is
+available, so no design work blocks on the install.
 
 Submodule pinned to `v0.2.0`.
 
