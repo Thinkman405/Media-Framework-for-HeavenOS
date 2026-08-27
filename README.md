@@ -7,18 +7,18 @@
 Built on [HeavenOS/NEOS](https://github.com/Thinkman405/HeavenOS) — consumed here as a git
 submodule pinned to a tagged release, never `main`.
 
-[![HeavenOS](https://img.shields.io/badge/HeavenOS-v0.2.0-6C5CE7?style=for-the-badge)](https://github.com/Thinkman405/HeavenOS/releases/tag/v0.2.0)
+[![HeavenOS](https://img.shields.io/badge/HeavenOS-v0.3.0-6C5CE7?style=for-the-badge)](https://github.com/Thinkman405/HeavenOS/releases/tag/v0.3.0)
 [![Scope](https://img.shields.io/badge/scope-video%20only-00B4D8?style=for-the-badge)](#scope--video-only)
 [![Target](https://img.shields.io/badge/target-GStreamer%20element-2EC4B6?style=for-the-badge)](#what-this-is-for)
-[![Status](https://img.shields.io/badge/status-blocked%20on%20SDK%20install-FF6B6B?style=for-the-badge)](#status)
+[![Status](https://img.shields.io/badge/status-in%20progress-F5A623?style=for-the-badge)](#status)
 
 </div>
 
 <br>
 
-> The video FFI bridge this framework builds on is real and verified. The GStreamer element itself
-> is fully designed and ready to implement — blocked only on installing a development SDK in the
-> current environment, not on any open design question.
+> The video FFI bridge this framework builds on is real and verified. The GStreamer element is
+> fully designed, and a real GStreamer development environment is now available (via WSL2/Ubuntu —
+> see [Status](#status)) — implementation is in progress.
 
 <br>
 
@@ -72,17 +72,16 @@ tools) — not VLC specifically, despite the name similarity in casual use.
 
 | Piece | State |
 |---|---|
-| Video C FFI bridge (`media_ffi_crystallise_video`) | ✅ Built and verified — opaque handle, panic-guarded, correct ownership, checked against both a Rust suite and a real, independently MSVC-compiled C program |
+| Video C FFI bridge (`media_ffi_crystallise_video`) | ✅ Built and verified — opaque handle, panic-guarded, correct ownership, checked against both a Rust suite and a real, independently compiled C program |
+| GStreamer development environment | ✅ Available — GStreamer 1.28.2 + `gcc`/`pkg-config`/`build-essential` in WSL2/Ubuntu, since the official Windows installer needs administrator elevation this environment couldn't grant. `media_ffi` builds and its own tests pass on Linux too, confirmed, not assumed. |
 | `neoscrystallize` GStreamer element design | ✅ Complete — base class, caps, properties, EOS-driven lifecycle, verification plan, all written up in [`CONTEXT.md`](CONTEXT.md) |
-| `neoscrystallize` implementation | ⏳ Blocked — see below |
+| `neoscrystallize` implementation | 🚧 In progress |
 
-**Blocked on the GStreamer development SDK.** It needs administrator elevation to install, which
-the development environment this was built in cannot grant (no interactive session to approve the
-UAC prompt) — `winget install` reports success without anything actually landing on disk. Not yet
-resolved. No implementation work is waiting on a design decision; only on the SDK becoming
-installable.
+**The element is built as a Linux `.so`, not a Windows `.dll`** — a deliberate consequence of the
+WSL route, not a compromise: the GStreamer-based applications this element actually targets
+(GNOME's Totem, various Linux/embedded tools) are predominantly Linux anyway.
 
-Submodule pinned to `v0.2.0`.
+Submodule pinned to `v0.3.0`.
 
 <br>
 
