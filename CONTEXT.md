@@ -1,12 +1,19 @@
 # Media Framework for HeavenOS — the `neoscrystallize` GStreamer element
 
-This is the design for the plugin this repo exists to build, written so
-implementation can start immediately once the GStreamer development SDK is
-actually available in the build environment — see the "Blocked" note at
-the bottom. Nothing below is speculative about what `media_ffi` provides;
-every signature referenced here is a real, already-verified function in
-`vendor/heavenos/neos/media_ffi` (opaque handle, panic-guarded, ownership
-correct, proven against a real independent C program).
+**Built and verified** — `src/gstneoscrystallize.c`, a real, dynamically-loadable
+GStreamer plugin. Registers correctly under `gst-inspect-1.0` and has run a
+real `gst-launch-1.0` pipeline end to end, producing genuine crystallisation
+data (see "Built and verified" at the bottom). The design below is what was
+actually implemented, not a proposal. Every `media_ffi` signature referenced
+here is a real, already-verified function in `vendor/heavenos/neos/media_ffi`
+(opaque handle, panic-guarded, ownership correct, proven against a real
+independent C program).
+
+Built on Linux, via WSL2/Ubuntu — the official Windows GStreamer SDK needs
+administrator elevation this development environment couldn't grant, and
+WSL sidesteps that entirely. Ships as a Linux `.so`, which fits its actual
+target audience (GStreamer-based Linux apps) better than a Windows `.dll`
+would have anyway.
 
 ## What kind of element this is, and why
 
@@ -36,26 +43,41 @@ pixel, no channels). A real pipeline converts color video upstream:
 ... ! videoconvert ! video/x-raw,format=GRAY8 ! neoscrystallize
 ```
 
-Pixel conversion is direct, not normalised: `media_ffi`'s own frames are
-each GRAY8 byte cast straight to `f64` (`byte as f64`, range 0-255) —
-confirmed against `crystallisation::codec::decode_ppm`'s own real
-behaviour (`body[off] as f64`, no rescaling), not assumed.
+Pixel conversion is `byte as f64 * scale` (see `scale` below) — `media_ffi`
+itself applies no rescaling (range 0-255, matching
+`crystallisation::codec::decode_ppm`'s own real behaviour, `body[off] as
+f64`), not assumed.
 
 ## Properties
 
 | Name | Type | Direction | Purpose |
 |---|---|---|---|
 | `tau` | `uint`, default `3` | read/write | Takens embedding delay, passed straight to `media_ffi_crystallise_video`. |
+| `scale` | `double`, default `3.0e-9` | read/write | Multiplied into every raw pixel byte before crystallisation — see below; not in the original design, added after real testing found it necessary. |
 | `output-path` | `string`, optional | read/write | If set, write a plain-text summary here when crystallisation completes. |
 | `node-count` | `uint64` | read-only | Set after EOS from `media_ffi_video_result_node_count`. |
 | `input-energy` | `double` | read-only | Set after EOS from `media_ffi_video_result_input_energy`. |
 | `fundamental-hz` | `double` | read-only | Set after EOS from `media_ffi_video_result_fundamental_hz`. |
 | `energy-conserving` | `boolean` | read-only | Set after EOS from `media_ffi_video_result_is_energy_conserving`. |
 
+**`scale` — a real gap the original design missed, found by actually running
+a pipeline, not by re-reading the spec.** `media_ffi_crystallise_video`
+applies no rescaling of its own — per `_mkb/timecrystal.md` §5.3, that is
+the caller's responsibility, the same way `neos/src/main.rs`'s own demo
+rescales its embedded frames before crystallising them. The first real
+`gst-launch-1.0` run through this element, before `scale` existed, hit
+exactly that: raw `videotestsrc` GRAY8 output (0-255) overflowed the
+Howard-Comma quantisable ceiling immediately (`signal needs 6.28e47 C_H
+quanta; only 9.0e15 are exactly countable`) — a correct, honest refusal,
+but one that made the element unusable with *any* real 8-bit video without
+a rescale step nothing in the pipeline provided. `scale`'s default,
+`3.0e-9`, matches the value this workspace's own real video fixtures
+already use elsewhere; a caller whose data is already pre-scaled sets
+`scale=1.0`.
+
 ## Internal state
 
-- A growing `Vec<u8>` (or a C `uint8_t` buffer, depending on implementation
-  language — see below) accumulating every frame's raw pixel bytes, in
+- A growing `GByteArray` accumulating every frame's raw pixel bytes, in
   arrival order — exactly the frame-major layout `media_ffi_crystallise_video`
   expects once cast to `f64`.
 - `width`, `height` — captured once from negotiated caps in `set_caps()`,
@@ -95,36 +117,64 @@ behaviour (`body[off] as f64`, no rescaling), not assumed.
 
 ## Implementation language
 
-C, against `gstreamer-1.0`/`gstbase-1.0`'s own headers, linking directly
-against `media_ffi`'s built `.dll`/`.lib` the same way
-`vendor/heavenos/neos/media_ffi/ffi_test/main.c` already does — no new
-language or binding layer needed, since `media_ffi.h` already exists and
-is already proven correct against a real MSVC-compiled C program.
+C, against `gstreamer-1.0`/`gstbase-1.0`/`gstreamer-video-1.0`'s own
+headers, linking directly against `media_ffi`'s built shared library the
+same way `vendor/heavenos/neos/media_ffi/ffi_test/main.c` already does —
+no new language or binding layer needed, since `media_ffi.h` already
+exists and is already proven correct against a real, independently
+compiled C program.
 
-## Verification plan, once buildable
+## Building
 
-Same discipline as every other piece of this workspace: build the plugin,
-point `GST_PLUGIN_PATH` at it, run `gst-inspect-1.0 neoscrystallize` to
-confirm real registration (not just that it compiled), then a real
-pipeline —
-
-```
-gst-launch-1.0 videotestsrc num-buffers=20 ! videoconvert ! \
-  video/x-raw,format=GRAY8 ! neoscrystallize tau=3 output-path=result.txt
+```bash
+cd vendor/heavenos/neos && cargo build -p media-ffi   # build the FFI bridge first
+cd ../../../src && ./build.sh                          # build the plugin
 ```
 
-— confirming `result.txt` contains real, non-placeholder crystallisation
-data, the same way `ffi_test.exe`'s printed values were checked against
-hand-computable expectations rather than merely "did it run."
+`build.sh` links with an `$ORIGIN`-relative `-rpath` so the resulting
+`libgstneoscrystallize.so` finds `libmedia_ffi.so` at runtime regardless of
+the caller's working directory — a real, previously-hit bug (a *relative*
+rpath resolves against the process's cwd, not the `.so`'s own location;
+`$ORIGIN` is the token that means the latter), not a guess.
 
-## Blocked
+## Built and verified
 
-GStreamer's official Windows development SDK
-(`gstreamer-1.0-msvc-x86_64-1.28.6.exe`) requires administrator
-elevation to install, which the environment this design was written in
-cannot grant — no interactive session exists to approve the UAC prompt,
-and `winget install` reports success without anything actually landing on
-disk (confirmed by searching for it afterward: no directory, no registry
-key, no running process). Not yet resolved. `vcpkg` (no admin required,
-but may build GStreamer from source rather than fetch a binary) is the
-untried next option.
+Same discipline as every other piece of this workspace: built the plugin,
+pointed `GST_PLUGIN_PATH` at it, ran `gst-inspect-1.0 neoscrystallize` —
+**real registration confirmed**: the correct `GstBaseSink` ancestry, the
+`GRAY8`-only pad template, and every property (`tau`, `scale`,
+`output-path`, and the four read-only result properties) all show up
+exactly as designed. Then a real pipeline:
+
+```bash
+gst-launch-1.0 -e videotestsrc num-buffers=20 pattern=ball ! videoconvert ! \
+  video/x-raw,format=GRAY8,width=8,height=8,framerate=30/1 ! \
+  neoscrystallize tau=3 output-path=result.txt
+```
+
+`result.txt` came back with real, non-placeholder crystallisation data —
+`nodes: 11`, `input_energy_joules: 2.0173601763e-20`,
+`fundamental_hz: 1.5000000000`, `energy_conserving: true` — checked as real
+values, the same way `ffi_test`'s printed values were checked against
+hand-computable expectations rather than merely "did it run." The error
+path was verified too: the same pipeline with `scale=1.0` (opting out of
+rescaling) produces a real `GST_ELEMENT_ERROR` naming the exact physical
+reason (`signal needs 6.28e47 C_H quanta; only 9.0e15 are exactly
+countable`), not a crash or a hang.
+
+## Resolved: the Windows SDK blocker
+
+GStreamer's official Windows development SDK needs administrator
+elevation this environment couldn't grant. Resolved via **WSL2/Ubuntu**
+(already installed on the host machine) instead of pursuing Windows
+elevation: `sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-base
+gstreamer1.0-plugins-good libgstreamer1.0-dev
+libgstreamer-plugins-base1.0-dev pkg-config build-essential` (run once, by
+the repo owner, in an interactive WSL terminal — a normal package install,
+not a Windows privilege escalation), then Rust via `rustup` (no sudo
+needed). `media_ffi` was confirmed to build and pass its own full test
+suite on Linux before any plugin code was written, and the real, existing
+C ABI test program (`vendor/heavenos/neos/media_ffi/ffi_test/main.c`) was
+extended with a Linux build script and re-verified there too — a second,
+independent confirmation (different OS, different compiler) that the FFI
+contract holds, not assumed to carry over from the Windows/MSVC one.
