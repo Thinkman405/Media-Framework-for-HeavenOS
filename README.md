@@ -15,24 +15,39 @@ a limitation of the underlying core.
 ## What this is for
 
 Bridges NEOS's real video crystallisation
-(`crystallisation::timecrystal::VolumetricTimeCrystal::crystallise_video`)
-into the multimedia plugin ecosystems real applications already use, so
-existing video software can consume NEOS-crystallised video without
-knowing anything about HeavenOS itself:
+(`crystallisation::timecrystal::VolumetricTimeCrystal::crystallise_video`,
+via `media_ffi_crystallise_video` in the core repo's C FFI bridge) into a
+real, dynamically-loadable **GStreamer element** — a `.dll`/`.so` any
+GStreamer-based application can load at runtime with no rebuild.
 
-- an **FFmpeg filter**, usable by anything built on `libavfilter`
-- a **GStreamer element/plugin**, usable by anything built on the
-  GStreamer pipeline model (VLC, and other video/editing applications)
+That target was chosen deliberately, not assumed, after checking how the
+three originally-named ecosystems (FFmpeg, GStreamer, VLC) actually work:
+FFmpeg's mainline `libavfilter` has **no stable, dynamically-loadable
+out-of-tree filter ABI** — a real FFmpeg filter means a custom-built
+FFmpeg fork, not a drop-in plugin. **VLC does not use GStreamer** — it has
+its own separate plugin architecture (VLC modules), built on `libavcodec`
+internally. GStreamer is the one of the three with a genuine out-of-tree
+plugin system, so it's the first (and, for now, only) target — it reaches
+GStreamer-based applications (GNOME's Totem, various Linux/embedded media
+tools), not VLC specifically. A VLC module would be a separate, later
+target if VLC integration is still wanted.
 
 ## Status
 
-**Not yet built.** Current state: the HeavenOS submodule is wired in,
-pinned to `v0.1.0`. HeavenOS's existing C FFI bridge
-(`vendor/heavenos/neos/media_ffi`) currently covers only the **image**
-pipeline — extending it with the equivalent video bridge, verified the
-same way (real ownership discipline, a panic boundary, and a genuine,
-independently-compiled C program proving the ABI actually works) is the
-next concrete step, before either plugin gets written.
+**The video FFI bridge exists and is verified; no GStreamer element yet.**
+`vendor/heavenos`'s `media_ffi` crate exposes
+`media_ffi_crystallise_video` and accessors across a real C ABI — opaque
+handle, panic-guarded, correct ownership — verified against both a Rust
+test suite and a real, independently MSVC-compiled C program
+(`vendor/heavenos/neos/media_ffi/ffi_test/main.c`).
+
+**Blocked on the GStreamer development SDK**, currently: it needs
+administrator elevation to install, which the development environment this
+was built in cannot grant (no interactive session to approve the UAC
+prompt). Not yet resolved — see `vendor/heavenos`'s own memory/notes for
+what's been tried.
+
+Submodule pinned to `v0.2.0`.
 
 ## Building
 
