@@ -1,0 +1,3 @@
+[submodule "vendor/heavenos"]
+	path = vendor/heavenos
+	url = https://github.com/Thinkman405/HeavenOS.git
